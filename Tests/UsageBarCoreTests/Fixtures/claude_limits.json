@@ -1,0 +1,13 @@
+{
+  "five_hour": { "utilization": 20.0, "resets_at": "2026-11-04T15:00:00+00:00" },
+  "seven_day": { "utilization": 18.0, "resets_at": "2026-11-08T03:00:00+00:00" },
+  "limits": [
+    { "kind": "session", "group": "session", "percent": 25, "resets_at": "2026-11-04T15:00:00Z", "severity": "normal" },
+    { "kind": "weekly_all", "group": "weekly", "percent": 18, "resets_at": "2026-11-08T03:00:00Z", "severity": "normal" },
+    { "kind": "weekly_scoped", "group": "weekly", "percent": 9, "resets_at": "2026-11-08T03:00:00Z",
+      "scope": { "model": { "display_name": "Fable" } }, "severity": "normal" },
+    { "kind": "weekly_scoped", "group": "weekly", "percent": 2, "resets_at": "2026-11-08T03:00:00Z",
+      "scope": { "surface": { "display_name": "Cowork" } } },
+    { "kind": "something_new", "percent": 50 }
+  ]
+}

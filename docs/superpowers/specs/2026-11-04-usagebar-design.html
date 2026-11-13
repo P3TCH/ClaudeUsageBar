@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UsageBar Design</title>
+<style>
+  :root { --bg:#fbfbfa; --fg:#1d1d1f; --muted:#6b6b70; --line:#e3e3e0; --code:#f1f1ee; --accent:#c4622d; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#161617; --fg:#ececec; --muted:#9a9aa0; --line:#2e2e31; --code:#232326; --accent:#e58a57; }
+  }
+  body { background:var(--bg); color:var(--fg); font:15px/1.6 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; margin:0; padding:32px 16px; }
+  main { max-width:820px; margin:0 auto; }
+  h1 { font-size:28px; margin:0 0 4px; }
+  h2 { font-size:19px; margin:32px 0 8px; border-bottom:1px solid var(--line); padding-bottom:4px; }
+  h3 { font-size:16px; margin:20px 0 6px; }
+  .meta { color:var(--muted); margin-bottom:24px; }
+  code { background:var(--code); padding:1px 5px; border-radius:4px; font:13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  pre { background:var(--code); padding:12px; border-radius:6px; overflow-x:auto; font:13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  table { border-collapse:collapse; width:100%; font-size:14px; margin:8px 0; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; }
+  .note { border-left:3px solid var(--accent); padding:4px 12px; color:var(--muted); }
+</style>
+</head>
+<body>
+<main>
+<h1>UsageBar</h1>
+<div class="meta">Design spec · 2026-11-04 · macOS menu bar app for Claude Code and Codex usage limits</div>
+
+<h2>1. Goal</h2>
+<p>A native Swift macOS app that lives in the menu bar and shows how much of your Claude Code and Codex (ChatGPT) usage limits you have used, so you can check at a glance without opening a terminal.</p>
+<ul>
+  <li>Sign in to each service with OAuth (PKCE) in the browser.</li>
+  <li>Claude: session (5-hour) use, weekly use (all models) and weekly Fable use, plus any other model-scoped weekly rows the server sends.</li>
+  <li>Codex: session (5-hour) use and weekly use.</li>
+  <li>The user chooses which values appear in the menu bar itself. The popover always shows everything.</li>
+</ul>
+
+<h3>Decisions from the user</h3>
+<table>
+  <tr><th>Topic</th><th>Decision</th></tr>
+  <tr><td>Menu bar content</td><td>User-selectable: any of Claude Session, Claude Weekly, Claude Fable, Codex Session, Codex Weekly. Default: Claude Session + Codex Session. None selected → icon only.</td></tr>
+  <tr><td>Label style</td><td>Icon + percent, e.g. <code>✳ 23%  ✳F 9%  ◎ 41%</code></td></tr>
+  <tr><td>Login</td><td>The app uses its own OAuth login, separate from the CLIs, so it never rotates the CLIs' refresh tokens.</td></tr>
+  <tr><td>Location</td><td><code>~/doc/ClaudeUsageBar</code>, git repo; no commits without an explicit request.</td></tr>
+</table>
+
+<h3>Out of scope (this round)</h3>
+<p>Launch at login, notifications near a limit, multiple accounts per service.</p>
+
+<h2>2. Endpoints (verified against the local CLIs)</h2>
+<p class="note">Both usage endpoints are undocumented. They are the same ones the official CLIs call (Claude Code 2.1.318, Codex 0.166.0), so they can change without notice. Parsers must tolerate missing fields.</p>
+
+<h3>Claude</h3>
+<table>
+  <tr><th>Item</th><th>Value</th></tr>
+  <tr><td>Client ID</td><td><code>9d1c250a-e61b-44d9-88ed-5944d1962f5e</code></td></tr>
+  <tr><td>Authorize</td><td><code>https://claude.com/cai/oauth/authorize</code> with <code>code=true</code>, <code>client_id</code>, <code>response_type=code</code>, <code>redirect_uri=http://localhost:&lt;random port&gt;/callback</code>, <code>scope=user:profile user:inference</code>, <code>code_challenge</code>, <code>code_challenge_method=S256</code>, <code>state</code></td></tr>
+  <tr><td>Token</td><td><code>POST https://platform.claude.com/v1/oauth/token</code>, JSON body. Exchange: <code>grant_type=authorization_code, code, redirect_uri, client_id, code_verifier, state</code>. Refresh: <code>grant_type=refresh_token, refresh_token, client_id</code>.</td></tr>
+  <tr><td>Usage</td><td><code>GET https://api.anthropic.com/api/oauth/usage</code>, headers <code>Authorization: Bearer</code>, <code>anthropic-beta: oauth-2025-04-20</code></td></tr>
+</table>
+<p>Usage response: the top-level <code>five_hour</code> / <code>seven_day</code> objects carry <code>utilization</code> (0–100) and <code>resets_at</code> (ISO 8601). Newer responses also carry <code>limits[]</code> rows with <code>kind</code> (<code>session</code>, <code>weekly_all</code>, <code>weekly_scoped</code>), <code>percent</code>, <code>resets_at</code> and <code>scope.model.display_name</code>. The weekly Fable limit is the <code>weekly_scoped</code> row whose display name is “Fable”. Parse the top-level keys first, then let <code>limits[]</code> rows override them.</p>
+
+<h3>Codex</h3>
+<table>
+  <tr><th>Item</th><th>Value</th></tr>
+  <tr><td>Client ID</td><td><code>app_EMoamEEZ73f0CkXaXp7hrann</code></td></tr>
+  <tr><td>Authorize</td><td><code>https://auth.openai.com/oauth/authorize</code> with <code>response_type=code</code>, <code>client_id</code>, <code>redirect_uri=http://localhost:1455/auth/callback</code> (fixed port, registered by OpenAI), <code>scope=openid profile email offline_access</code>, PKCE S256, <code>state</code>, <code>id_token_add_organizations=true</code>, <code>codex_cli_simplified_flow=true</code>, <code>originator=codex_cli_rs</code></td></tr>
+  <tr><td>Token</td><td><code>POST https://auth.openai.com/oauth/token</code>. Exchange is form-encoded; refresh is JSON <code>{client_id, grant_type: refresh_token, refresh_token, scope: "openid profile email"}</code>.</td></tr>
+  <tr><td>Account</td><td><code>chatgpt_account_id</code> inside the id_token claim <code>https://api.openai.com/auth</code>; email from the <code>email</code> claim; expiry from the access token's <code>exp</code>.</td></tr>
+  <tr><td>Usage</td><td><code>GET https://chatgpt.com/backend-api/wham/usage</code>, headers <code>Authorization: Bearer</code>, <code>ChatGPT-Account-Id</code></td></tr>
+</table>
+<p>Usage response: <code>plan_type</code> plus <code>rate_limit.primary_window</code> / <code>secondary_window</code>, each with <code>used_percent</code>, <code>limit_window_seconds</code>, <code>reset_at</code> (Unix seconds) or <code>reset_after_seconds</code>. Either window can be null, and some plans send only a weekly primary window, so a window is classified by length: ≤ 24 h is the session, longer is weekly.</p>
+
+<h2>3. Architecture</h2>
+<p>Swift Package, macOS 14+, no third-party dependencies. Two targets:</p>
+<ul>
+  <li><b>UsageBarCore</b> (library, unit-tested): models, parsers, PKCE, JWT decoding, label formatting, OAuth flows, usage clients, Keychain storage, loopback server.</li>
+  <li><b>UsageBar</b> (executable): SwiftUI <code>MenuBarExtra</code> with <code>.window</code> style, the observable store and the views.</li>
+</ul>
+<p><code>scripts/build-app.sh</code> builds a release binary, wraps it in <code>build/UsageBar.app</code> with an <code>Info.plist</code> that sets <code>LSUIElement</code> (no Dock icon), and ad-hoc signs it.</p>
+
+<h3>Components</h3>
+<table>
+  <tr><th>Unit</th><th>Responsibility</th></tr>
+  <tr><td><code>Models</code></td><td><code>Provider</code>, <code>MetricKind</code> (session / weekly / scoped(name)), <code>UsageMetric</code>, <code>UsageSnapshot</code>, <code>StoredToken</code>, <code>UsageError</code></td></tr>
+  <tr><td><code>PKCE</code></td><td>Verifier, S256 challenge, state</td></tr>
+  <tr><td><code>JWT</code></td><td>Decode a JWT payload (no signature check; the token came straight from the issuer over TLS)</td></tr>
+  <tr><td><code>LoopbackServer</code></td><td>One-shot HTTP listener bound to the loopback interface; returns the callback query parameters</td></tr>
+  <tr><td><code>OAuthFlow</code></td><td>Start the listener, open the browser, wait for the redirect (5-minute timeout), check <code>state</code></td></tr>
+  <tr><td><code>ClaudeService</code> / <code>CodexService</code></td><td>Sign in, refresh, fetch usage; each conforms to <code>UsageService</code></td></tr>
+  <tr><td><code>ClaudeUsageParser</code> / <code>CodexUsageParser</code></td><td>Pure functions: JSON → <code>[UsageMetric]</code></td></tr>
+  <tr><td><code>KeychainStore</code></td><td>One generic-password item per provider, JSON-encoded <code>StoredToken</code></td></tr>
+  <tr><td><code>MenuBarItem</code> + <code>MenuBarLabel</code></td><td>The selectable items and the label text built from the current snapshots</td></tr>
+  <tr><td><code>UsageStore</code> (app)</td><td>Holds per-provider state, polls every 5 minutes, refreshes tokens when they are within 60 s of expiry or after a 401</td></tr>
+  <tr><td>Views (app)</td><td>Menu bar label, popover with a card per provider (bars, percent, reset time), inline settings panel</td></tr>
+</table>
+
+<h2>4. Data flow</h2>
+<pre>Sign in:  button → OAuthFlow (loopback + browser) → code → token exchange → KeychainStore → fetch usage
+Poll:     timer (5 min) / Refresh button → token valid? (refresh if needed) → GET usage → parser → snapshot
+Display:  snapshots + selected MenuBarItems → MenuBarLabel text;  snapshots → popover cards</pre>
+
+<h2>5. Error handling</h2>
+<table>
+  <tr><th>Case</th><th>Behaviour</th></tr>
+  <tr><td>401 from usage</td><td>Refresh once and retry. If it still fails, mark the provider “Sign in again”.</td></tr>
+  <tr><td>Refresh rejected</td><td>Delete the stored token and show “Sign in again”.</td></tr>
+  <tr><td>429 / network error</td><td>Keep the last snapshot, show the error and the time of the last good fetch, retry on the next cycle.</td></tr>
+  <tr><td>Unexpected JSON</td><td>“Unknown response” on that card only; the other provider keeps working.</td></tr>
+  <tr><td>Port 1455 in use</td><td>Message: close any running <code>codex login</code> and try again.</td></tr>
+  <tr><td>State mismatch / timeout / user denies</td><td>Sign-in fails with a message; nothing is stored.</td></tr>
+</table>
+
+<h2>6. Testing</h2>
+<ul>
+  <li><code>swift test</code> (Swift Testing): PKCE format and challenge vector, JWT decode, Claude parser (top-level only; with <code>limits[]</code> including Fable), Codex parser (both windows; weekly-only primary; null windows), menu bar label formatting, reset-time formatting.</li>
+  <li>Manual end-to-end: build the <code>.app</code>, sign in to both services in the browser, compare numbers with <code>/usage</code> in Claude Code and <code>/status</code> in Codex.</li>
+</ul>
+</main>
+</body>
+</html>
